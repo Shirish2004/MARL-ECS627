@@ -1,181 +1,141 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# grid world dimensions
-grid_size = 9 # 9x9
+grid_size = 9
+start_state = (0, 0)
+goal_state = (8, 8)
+obstacles = [(1, 3), (2, 3), (3, 3), (3, 2), (3, 1),
+             (5, 5), (6, 5), (7, 5), (8, 5), (5, 6), (5, 7), (5, 8)]
+in_portal = (2, 2)
+out_portal = (6, 6)
+actions = [(1, 0), (-1, 0), (0, -1), (0, 1)]
+gamma = 0.9
 
-# rewards matrix
-rewards = np.zeros((grid_size, grid_size))
-rewards[8, 8] = 1  # Goal position with reward +1
+def is_valid(s):
+    return 0 <= s[0] < grid_size and 0 <= s[1] < grid_size and s not in obstacles
 
-# tunnel locations
-tunnel_in = (2, 2)
-tunnel_out = (6, 6)
+def next_state(s, a):
+    state = (s[0] + a[0], s[1] + a[1])
+    if not is_valid(state):
+        return s
+    if state == in_portal:
+        return out_portal
+    return state
 
-# blockages
-blockages = [(3, 1), (3, 2), (3, 3), (2, 3), (1, 3), 
-             (5, 5), (5, 6), (5, 7), (5, 8), (6, 5), 
-             (7, 5), (8, 5)]
-
-# actions
-actions = ['up', 'down', 'left', 'right']
-action_vectors = {
-    'up': (-1, 0),
-    'down': (1, 0),
-    'left': (0, -1),
-    'right': (0, 1)
-}
-
-#  Value Iteration function
-def value_iteration(grid_size, rewards, gamma=0.9, theta=1e-6):
+def value_iteration():
     V = np.zeros((grid_size, grid_size))
-    policy = np.zeros((grid_size, grid_size), dtype=int)
+    policy = np.zeros((grid_size, grid_size, 2), dtype=int)
 
     while True:
         delta = 0
         for i in range(grid_size):
             for j in range(grid_size):
-                if (i, j) in blockages:
+                s = (i, j)
+                if s == goal_state or s in obstacles:
                     continue
-                
                 old_v = V[i, j]
-                q_values = []
-
-                for action in actions:
-                    next_i = i + action_vectors[action][0]
-                    next_j = j + action_vectors[action][1]
-
-                    # Tunnel logic
-                    if (i, j) == tunnel_in:
-                        next_i, next_j = tunnel_out
-
-                    if 0 <= next_i < grid_size and 0 <= next_j < grid_size and (next_i, next_j) not in blockages:
-                        q_values.append(rewards[next_i, next_j] + gamma * V[next_i, next_j])
-                    else:
-                        q_values.append(rewards[i, j] + gamma * V[i, j])
-
-                V[i, j] = max(q_values)
-                policy[i, j] = np.argmax(q_values)
+                Q = np.zeros(len(actions))
+                for idx, a in enumerate(actions):
+                    next_s = next_state(s, a)
+                    reward = 1 if next_s == goal_state else 0
+                    Q[idx] = reward + gamma * V[next_s[0], next_s[1]]
+                V[i, j] = np.max(Q)
+                policy[i, j] = actions[np.argmax(Q)]
                 delta = max(delta, abs(old_v - V[i, j]))
-
-        if delta < theta:
+        if delta < 1e-4:
             break
+    
+    return policy, V
 
-    return V, policy
+def policy_iteration():
+    policy = np.zeros((grid_size, grid_size, 2), dtype=int)
+    for i in range(grid_size):
+        for j in range(grid_size):
+            if (i, j) != goal_state and (i, j) not in obstacles:
+                policy[i, j] = actions[np.random.choice(len(actions))]
 
-# Policy Iteration function
-def policy_iteration(grid_size, rewards, gamma=0.9):
     V = np.zeros((grid_size, grid_size))
-    policy = np.random.choice(len(actions), size=(grid_size, grid_size))
 
-    def policy_evaluation(policy, V, gamma=0.9, theta=1e-6):
+    while True:
         while True:
             delta = 0
             for i in range(grid_size):
                 for j in range(grid_size):
-                    if (i, j) in blockages:
+                    s = (i, j)
+                    if s == goal_state or s in obstacles:
                         continue
-                    
+                    a = tuple(policy[i, j])
+                    next_s = next_state(s, a)
+                    reward = 1 if next_s == goal_state else 0
                     old_v = V[i, j]
-                    action = actions[policy[i, j]]
-                    next_i = i + action_vectors[action][0]
-                    next_j = j + action_vectors[action][1]
-
-                    # Tunnel logic
-                    if (i, j) == tunnel_in:
-                        next_i, next_j = tunnel_out
-
-                    if 0 <= next_i < grid_size and 0 <= next_j < grid_size and (next_i, next_j) not in blockages:
-                        V[i, j] = rewards[next_i, next_j] + gamma * V[next_i, next_j]
-                    else:
-                        V[i, j] = rewards[i, j] + gamma * V[i, j]
-
+                    V[i, j] = reward + gamma * V[next_s[0], next_s[1]]
                     delta = max(delta, abs(old_v - V[i, j]))
-
-            if delta < theta:
+            if delta < 1e-4:
                 break
 
-        return V
-
-    while True:
-        policy_stable = True
-        V = policy_evaluation(policy, V, gamma)
-
+        stable = True
         for i in range(grid_size):
             for j in range(grid_size):
-                if (i, j) in blockages:
+                s = (i, j)
+                if s == goal_state or s in obstacles:
                     continue
-                
-                old_action = policy[i, j]
-                q_values = []
-
-                for action in actions:
-                    next_i = i + action_vectors[action][0]
-                    next_j = j + action_vectors[action][1]
-
-                    # Tunnel logic meaning that when the robot enters into the tunnel it directly comes out of the tunnel 
-                    if (i, j) == tunnel_in:
-                        next_i, next_j = tunnel_out
-
-                    if 0 <= next_i < grid_size and 0 <= next_j < grid_size and (next_i, next_j) not in blockages:
-                        q_values.append(rewards[next_i, next_j] + gamma * V[next_i, next_j])
-                    else:
-                        q_values.append(rewards[i, j] + gamma * V[i, j])
-
-                policy[i, j] = np.argmax(q_values)
-
-                if old_action != policy[i, j]:
-                    policy_stable = False
-
-        if policy_stable:
+                old_action = tuple(policy[i, j])
+                Q = np.zeros(len(actions))
+                for idx, a in enumerate(actions):
+                    next_s = next_state(s, a)
+                    reward = 1 if next_s == goal_state else 0
+                    Q[idx] = reward + gamma * V[next_s[0], next_s[1]]
+                new_action = actions[np.argmax(Q)]
+                policy[i, j] = new_action
+                if old_action != new_action:
+                    stable = False
+        if stable:
             break
-
-    return V, policy
-
-# Value Iteration
-V_vi, policy_vi = value_iteration(grid_size, rewards)
-
-# Policy Iteration
-V_pi, policy_pi = policy_iteration(grid_size, rewards)
-
-# Visualization Function
-def plot_policy(policy, title):
-    action_dict = {
-        0: (-1, 0),  # up
-        1: (1, 0),   # down
-        2: (0, -1),  # left
-        3: (0, 1)    # right
-    }
     
+    return policy, V
+
+def plot_policy(policy, title):
+    plt.figure(figsize=(8, 8))
     X, Y = np.meshgrid(np.arange(grid_size), np.arange(grid_size))
     U = np.zeros_like(X, dtype=float)
     V = np.zeros_like(Y, dtype=float)
 
     for i in range(grid_size):
         for j in range(grid_size):
-            if (i, j) in blockages:
+            if (i, j) in {goal_state, in_portal} or (i, j) in obstacles:
                 continue
-            U[i, j], V[i, j] = action_dict[policy[i, j]]
+            action = policy[i, j]
+            U[i, j] = action[1]
+            V[i, j] = action[0]
 
-    plt.figure(figsize=(7, 7))
-    plt.quiver(Y, X, V, U)
-    plt.title(title)
-    # plt.xlim(-0.5, grid_size - 0.5)
-    # plt.ylim(-0.5, grid_size - 0.5)
-    # plt.gca().invert_yaxis()
-    # plt.show()
-    plt.gca().set_aspect('equal')
-    # plt.gca().invert_yaxis()
-    plt.grid()
+    plt.quiver(X, Y, U, V, angles='xy', scale_units='xy', scale=1, color='black')
 
-    # Annotate the key locations
-    plt.text(0, 0, 'Start', ha='center', va='center', color='blue', fontsize=12)
-    plt.text(tunnel_in[1], tunnel_in[0], 'IN', ha='center', va='center', color='red', fontsize=12)
-    plt.text(tunnel_out[1], tunnel_out[0], 'OUT', ha='center', va='center', color='green', fontsize=12)
-    plt.text(8, 8, 'Goal', ha='center', va='center', color='purple', fontsize=12)
+    for x in range(grid_size + 1):
+        plt.axhline(x - 0.5, color='black', linewidth=1)
+    for y in range(grid_size + 1):
+        plt.axvline(y - 0.5, color='black', linewidth=1)
+
+    plt.xlim(-0.5, grid_size - 0.5)
+    plt.ylim(-0.5, grid_size - 0.5)
+    plt.grid(False)
+    plt.title(title, fontsize=16)
+    plt.gca().set_aspect('equal', adjustable='box')
+
+    plt.plot(goal_state[1], goal_state[0], 'r*', markersize=15)
+    plt.text(goal_state[1], goal_state[0], 'Goal', fontsize=12, ha='center', va='center')
+
+    plt.plot(start_state[1], start_state[0], 'go', markersize=10)
+    plt.text(start_state[1], start_state[0], 'Start', fontsize=12, ha='center', va='center')
+
+    plt.plot(in_portal[1], in_portal[0], 'bs', markersize=10)
+    plt.text(in_portal[1], in_portal[0], 'IN', fontsize=10, ha='center', va='center', color='white')
+    plt.plot(out_portal[1], out_portal[0], 'bs', markersize=10)
+    plt.text(out_portal[1], out_portal[0], 'OUT', fontsize=10, ha='center', va='center', color='white')
+
     plt.show()
 
+policy_from_value, _ = value_iteration()
+plot_policy(policy_from_value, "Optimal Policy - Value Iteration")
 
-# Plot the optimal policies
-plot_policy(policy_vi, "Optimal Policy - Value Iteration")
-plot_policy(policy_pi, "Optimal Policy - Policy Iteration")
+policy_from_policy, _ = policy_iteration()
+plot_policy(policy_from_policy, "Optimal Policy - Policy Iteration")
